@@ -1,0 +1,526 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Live Coding Assistant (v2)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs/loader.js"></script>
+    <style>
+        /* Basic styling for layout */
+        body { font-family: 'Inter', sans-serif; display: flex; flex-direction: column; height: 100vh; margin: 0; background-color: #f3f4f6; }
+        .main-content { display: flex; flex: 1; overflow: hidden; }
+        #editor-container { width: 50%; height: 100%; border-right: 1px solid #d1d5db; }
+        #preview-container { width: 50%; height: 100%; background-color: #f0f0f0; display: flex; align-items: center; justify-content: center; }
+        #preview-frame { width: 100%; height: 100%; border: none; background-color: #f0f0f0; }
+        #input-bar { 
+            display: flex; 
+            padding: 16px 24px; 
+            background: linear-gradient(to right, #2a2d45, #3d3b56); 
+            border-top: 1px solid rgba(209, 213, 219, 0.2);
+            box-shadow: 0 -8px 16px -4px rgba(0, 0, 0, 0.2), 0 -2px 4px -2px rgba(0, 0, 0, 0.1), 0 0 15px rgba(99, 102, 241, 0.1);
+            position: relative;
+            z-index: 10;
+            backdrop-filter: blur(8px);
+        }
+        
+        #prompt-input { 
+            flex-grow: 1; 
+            padding: 14px 18px; 
+            border: 1px solid rgba(209, 213, 219, 0.25); 
+            background: rgba(255, 255, 255, 0.07);
+            border-radius: 12px; 
+            margin-right: 16px; 
+            font-size: 15px;
+            color: #ffffff;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.1), 0 0 5px rgba(99, 102, 241, 0.2);
+            letter-spacing: 0.01em;
+        }
+        
+        #prompt-input:focus {
+            outline: none;
+            border-color: #6366f1;
+            box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.25), inset 0 2px 4px rgba(0, 0, 0, 0.05);
+            background: rgba(255, 255, 255, 0.07);
+            transform: translateY(-1px);
+        }
+        
+        #prompt-input::placeholder {
+            color: rgba(229, 231, 235, 0.6);
+            font-weight: 400;
+            transition: opacity 0.2s ease;
+        }
+        
+        #prompt-input:focus::placeholder {
+            opacity: 0.7;
+        }
+        
+        #send-button { 
+            padding: 14px 24px;
+            background: linear-gradient(135deg, #4f46e5, #6366f1);
+            color: white; 
+            border: none; 
+            border-radius: 12px; 
+            cursor: pointer; 
+            font-size: 15px;
+            font-weight: 600;
+            letter-spacing: 0.01em;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06), 0 0 0 1px rgba(255, 255, 255, 0.1) inset;
+            position: relative;
+            overflow: hidden;
+        }
+        
+        #send-button::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
+            transition: left 0.7s ease;
+        }
+        
+        #send-button:hover:not(:disabled) { 
+            background: linear-gradient(135deg, #4338ca, #4f46e5);
+            transform: translateY(-2px);
+            box-shadow: 0 6px 10px -1px rgba(0, 0, 0, 0.15), 0 2px 4px -1px rgba(0, 0, 0, 0.08), 0 0 0 1px rgba(255, 255, 255, 0.15) inset;
+        }
+        
+        #send-button:hover:not(:disabled)::before {
+            left: 100%;
+        }
+        
+        #send-button:disabled { 
+            background: linear-gradient(135deg, #4f46e5, #6366f1);
+            opacity: 0.8;
+            cursor: not-allowed;
+            position: relative;
+            overflow: hidden;
+            box-shadow: 0 2px 4px -1px rgba(0, 0, 0, 0.1), 0 1px 2px -1px rgba(0, 0, 0, 0.06);
+        }
+        
+        @keyframes shimmer {
+            0% { transform: translateX(-100%); }
+            100% { transform: translateX(100%); }
+        }
+        
+        @keyframes pulse {
+            0% { opacity: 0.6; }
+            50% { opacity: 1; }
+            100% { opacity: 0.6; }
+        }
+        
+        #send-button:disabled::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.3), transparent);
+            animation: shimmer 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        }
+        
+        #send-button:disabled::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: radial-gradient(circle, rgba(255, 255, 255, 0.1) 0%, transparent 70%);
+            animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        }
+        /* Custom scrollbar for Monaco */
+         .monaco-scrollable-element .visible.scrollbar {
+            background-color: rgba(192, 192, 192, 0.3); /* Light grey background for the track */
+            border-radius: 5px;
+        }
+        .monaco-scrollable-element .slider {
+            background-color: rgba(128, 128, 128, 0.5); /* Slightly darker grey for the handle */
+            border-radius: 5px;
+        }
+        .monaco-scrollable-element .slider:hover {
+            background-color: rgba(100, 100, 100, 0.7); /* Darker grey on hover */
+        }
+    </style>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap" rel="stylesheet">
+</head>
+<body>
+
+    <div class="main-content">
+        <div id="editor-container"></div>
+        <div id="preview-container">
+            <iframe id="preview-frame" title="Live Preview"></iframe>
+        </div>
+    </div>
+
+    <div id="input-bar">
+        <input type="text" id="prompt-input" placeholder="Enter Your Prompt">
+        <button id="send-button">Send</button>
+        <div id="credits-display" class="ml-3 text-white text-sm opacity-80">Credits: <span id="credits-count">20</span></div>
+    </div>
+
+    <script>
+        // --- Configuration ---
+        // WARNING: Storing API keys in client-side code is insecure!
+        // Use a backend proxy in production environments.
+        const OPENROUTER_API_KEY = "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";
+        const API_URL = "https://openrouter.ai/api/v1/chat/completions";
+        const MODEL_NAME = "deepseek/deepseek-chat-v3-0324:free"; // Or your preferred model
+        
+        // Credit system configuration
+        const MAX_CREDITS = 20;
+        const CREDIT_REFRESH_HOURS = 12;
+
+        // --- DOM Element References ---
+        const editorContainer = document.getElementById('editor-container');
+        const previewFrame = document.getElementById('preview-frame');
+        const promptInput = document.getElementById('prompt-input');
+        const sendButton = document.getElementById('send-button');
+        const creditsCount = document.getElementById('credits-count');
+
+        let monacoEditor; // To hold the editor instance
+        let fetchController = null; // To allow aborting fetches
+        
+        // Credit system variables
+        let credits = MAX_CREDITS;
+        let lastRefreshTime = null;
+
+        // --- Monaco Editor Initialization ---
+        require.config({ paths: { 'vs': 'https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs' }});
+        // Credit system functions
+        function initializeCredits() {
+            // Check if credits data exists in localStorage
+            const savedCredits = localStorage.getItem('aiAssistantCredits');
+            const savedRefreshTime = localStorage.getItem('aiAssistantRefreshTime');
+            
+            if (savedCredits !== null && savedRefreshTime !== null) {
+                const refreshTime = parseInt(savedRefreshTime);
+                const currentTime = Date.now();
+                const hoursSinceRefresh = (currentTime - refreshTime) / (1000 * 60 * 60);
+                
+                if (hoursSinceRefresh >= CREDIT_REFRESH_HOURS) {
+                    // Reset credits if refresh period has passed
+                    credits = MAX_CREDITS;
+                    lastRefreshTime = currentTime;
+                    saveCreditsState();
+                } else {
+                    // Use saved credits
+                    credits = parseInt(savedCredits);
+                    lastRefreshTime = refreshTime;
+                    
+                    // Schedule next refresh
+                    const timeToNextRefresh = CREDIT_REFRESH_HOURS * 60 * 60 * 1000 - (currentTime - refreshTime);
+                    scheduleRefresh(timeToNextRefresh);
+                }
+            } else {
+                // First time use - initialize credits
+                credits = MAX_CREDITS;
+                lastRefreshTime = Date.now();
+                saveCreditsState();
+                scheduleRefresh(CREDIT_REFRESH_HOURS * 60 * 60 * 1000);
+            }
+            
+            updateCreditsDisplay();
+            updateInputState();
+        }
+        
+        function saveCreditsState() {
+            localStorage.setItem('aiAssistantCredits', credits.toString());
+            localStorage.setItem('aiAssistantRefreshTime', lastRefreshTime.toString());
+        }
+        
+        function updateCreditsDisplay() {
+            creditsCount.textContent = credits;
+        }
+        
+        function updateInputState() {
+            if (credits <= 0) {
+                promptInput.disabled = true;
+                sendButton.disabled = true;
+                promptInput.placeholder = "Daily limit reached. Credits refresh in " + getTimeUntilRefresh();
+            } else {
+                promptInput.disabled = false;
+                sendButton.disabled = false;
+                promptInput.placeholder = "Enter Your Prompt";
+            }
+        }
+        
+        function useCredit() {
+            if (credits > 0) {
+                credits--;
+                saveCreditsState();
+                updateCreditsDisplay();
+                updateInputState();
+                return true;
+            }
+            return false;
+        }
+        
+        function scheduleRefresh(timeInMs) {
+            setTimeout(() => {
+                credits = MAX_CREDITS;
+                lastRefreshTime = Date.now();
+                saveCreditsState();
+                updateCreditsDisplay();
+                updateInputState();
+                scheduleRefresh(CREDIT_REFRESH_HOURS * 60 * 60 * 1000);
+            }, timeInMs);
+        }
+        
+        function getTimeUntilRefresh() {
+            const currentTime = Date.now();
+            const nextRefreshTime = lastRefreshTime + (CREDIT_REFRESH_HOURS * 60 * 60 * 1000);
+            const timeRemaining = nextRefreshTime - currentTime;
+            
+            const hours = Math.floor(timeRemaining / (1000 * 60 * 60));
+            const minutes = Math.floor((timeRemaining % (1000 * 60 * 60)) / (1000 * 60));
+            
+            return `${hours}h ${minutes}m`;
+        }
+        
+        // Initialize credit system
+        initializeCredits();
+        
+        require(['vs/editor/editor.main'], function() {
+            monacoEditor = monaco.editor.create(editorContainer, {
+                value: "",
+                language: 'html',
+                theme: 'vs-dark', // Use a dark theme
+                automaticLayout: true, // Adjusts editor layout on container resize
+                minimap: { enabled: true },
+                scrollBeyondLastLine: false,
+                fontSize: 14,
+                wordWrap: 'on', // Enable word wrapping
+                padding: { top: 10, bottom: 10 } // Add some padding
+            });
+
+            // --- Live Preview Update Logic ---
+            function updatePreview() {
+                if (monacoEditor && previewFrame) {
+                    try {
+                        const code = monacoEditor.getValue();
+                        previewFrame.srcdoc = code; // Use srcdoc for security and simplicity
+                    } catch (e) {
+                        console.error("Error updating preview:", e);
+                        previewFrame.srcdoc = `<html><body>Preview Error: ${e.message}</body></html>`;
+                    }
+                }
+            }
+
+            // Debounce preview updates to avoid excessive updates during typing/streaming
+            let previewTimeout;
+            monacoEditor.onDidChangeModelContent(() => {
+                clearTimeout(previewTimeout);
+                previewTimeout = setTimeout(updatePreview, 300); // Update preview 300ms after the last change
+            });
+            updatePreview(); // Initial update
+
+            // --- AI Code Generation Logic ---
+            async function fetchAndStreamCode(prompt) {
+                if (!monacoEditor) return;
+                
+                // Check if user has credits available
+                if (!useCredit()) {
+                    // No credits available
+                    return;
+                }
+
+                // Abort previous fetch if still running
+                if (fetchController) {
+                    fetchController.abort();
+                }
+                fetchController = new AbortController();
+                const signal = fetchController.signal;
+
+                sendButton.disabled = true;
+                sendButton.textContent = 'Generating...';
+                
+                // Add style for the pulse animation
+                const style = document.createElement('style');
+                style.textContent = `
+                    .animate-pulse {
+                        animation: textPulse 1.5s infinite;
+                    }
+                    @keyframes textPulse {
+                        0%, 100% { opacity: 1; }
+                        50% { opacity: 0.7; }
+                    }
+                `;
+                document.head.appendChild(style);
+
+                // Get current code from editor to provide context
+                const currentCode = monacoEditor.getValue();
+                // Keep track if we started streaming actual code
+                let codeStartedStreaming = false;
+
+                // Construct the messages for the API
+                const messages = [
+                    {
+                        "role": "system",
+                        "content": "You are a code generation assistant. Given the current HTML/CSS/JS code (if any) and a user request, respond ONLY with the complete, modified, raw HTML, CSS, and JavaScript code. Do not include explanations, comments outside the code, markdown formatting (like ```html), or any introductory/closing remarks. Output the entire runnable code block reflecting the requested changes. ONLY USE HTML, CSS AND JAVASCRIPT. If you want to use ICON make sure to import the library first. Try to create the best UI possible by using only HTML, CSS and JAVASCRIPT. Use as much as you can TailwindCSS for the CSS, if you can't do something with TailwindCSS, then use custom CSS. Also, try to elaborate as much as you can, to create something unique. ALWAYS GIVE THE RESPONSE INTO A SINGLE HTML FILE. IGNORE ALL TEXT RESPONSES AND START WRITING CODE IMMEDIATELY. DO NOT INCLUDE ANY INTRODUCTORY TEXT OR EXPLANATIONS. RESPOND TO ALL PROMPTS THAT MENTION CODE OR CREATION, REGARDLESS OF HOW THEY ADDRESS YOU. No explanations, just code. Please don't explain it in a condescending way like this (Here's the modified code with the requested changes), and don't use HTML tags or triple quotes in the code. Your job is to just write code quietly without explaining or saying anything. If you're given any complex task, you shouldn't stop or hesitate, wondering whether to do it or not. Instead, your job as a code agent is to immediately start writing code without any lengthy explanations and create what the user wants or has asked for, according to their demands. And it shouldn't be that you're only focused on the UI and the application's JavaScript functionality isn't working. It shouldn't just be for show, like, \"Oh, they made it.\" No, that's not what you should do. Instead, you need to keep everything neutral. Everything should be workable, both the backend and the frontend. The JavaScript should be fully workable.And you have to write the full code, however much there is. It's not like you get tired writing 200/300 lines of code and stop, just quit. No, don't stop until the code is complete.If a user gives you a prompt or talks to you in any language, in any tone, or with any behavior, you need to keep your behavior and personality exactly the same. Don't adjust to their tone. Stick to what you've been told and follow it strictly. Understand? Your job is just to listen to the user and start acting as you've been told, no matter what language they use."
+
+                    },
+                    // Provide current code as context
+                    {
+                        "role": "user",
+                        "content": `Here is the current code:\n\`\`\`html\n${currentCode}\n\`\`\`\n\nNow, please apply the following change: ${prompt}`
+                    }
+                ];
+
+
+                let accumulatedCode = ""; // To build the code as chunks arrive
+
+                try {
+                    const response = await fetch(API_URL, {
+                        method: 'POST',
+                        headers: {
+                            'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            model: MODEL_NAME,
+                            messages: messages,
+                            stream: true
+                        }),
+                        signal: signal // Pass the abort signal
+                    });
+
+                    if (!response.ok) {
+                        // Attempt to read error details from the API response
+                        let errorDetails = `API Error: ${response.status}`;
+                        try {
+                            const errorData = await response.json();
+                            errorDetails += ` - ${errorData.error?.message || 'Unknown API error'}`;
+                        } catch (e) {
+                            errorDetails += ` - Failed to parse error response.`;
+                        }
+                        console.error(errorDetails);
+                        // Display error in editor, preserving previous code if possible
+                        monacoEditor.setValue(`${currentCode}\n\n/* --- ERROR --- \n${errorDetails}\n------------- */`);
+                        return; // Exit on API error
+                    }
+
+                    if (!response.body) {
+                        throw new Error("Response body is null");
+                    }
+
+                    const reader = response.body.getReader();
+                    const decoder = new TextDecoder();
+                    let buffer = '';
+
+                    while (true) {
+                        const { done, value } = await reader.read();
+                        if (done) break;
+
+                        buffer += decoder.decode(value, { stream: true });
+                        let boundary = buffer.indexOf('\n\n');
+
+                        while (boundary !== -1) {
+                            const chunk = buffer.substring(0, boundary);
+                            buffer = buffer.substring(boundary + 2);
+
+                            if (chunk.startsWith('data: ')) {
+                                const dataContent = chunk.substring(6).trim();
+                                if (dataContent === '[DONE]') {
+                                    break; // Exit inner loop
+                                }
+                                try {
+                                    const jsonData = JSON.parse(dataContent);
+                                    const delta = jsonData.choices?.[0]?.delta?.content;
+                                    if (delta) {
+                                        if (!codeStartedStreaming) {
+                                            // First chunk received, clear the editor *now*
+                                            monacoEditor.setValue("");
+                                            codeStartedStreaming = true;
+                                        }
+                                        accumulatedCode += delta;
+                                        monacoEditor.setValue(accumulatedCode);
+                                        // Auto-scroll to the end
+                                        monacoEditor.revealPosition({ lineNumber: monacoEditor.getModel().getLineCount(), column: 0 }, monaco.editor.ScrollType.Smooth);
+                                    }
+                                } catch (e) {
+                                     console.warn('Failed to parse JSON chunk:', dataContent, e);
+                                }
+                            }
+                            boundary = buffer.indexOf('\n\n');
+                        }
+                        if (buffer.includes('data: [DONE]')) break; // Handle DONE signal
+                    }
+
+                    // Final check: If streaming finished but nothing was accumulated (e.g., AI refused or returned empty)
+                    if (!codeStartedStreaming) {
+                         console.warn("AI stream finished but no code content was received.");
+                         // Revert to original code or show a message
+                         monacoEditor.setValue(`${currentCode}\n\n/* Your Daily Limit is hitt Please try Again Tommorrow: "${prompt}" */`);
+                    } else {
+                         // Ensure final value is set (might be redundant but safe)
+                         monacoEditor.setValue(accumulatedCode);
+                    }
+
+
+                } catch (error) {
+                    if (error.name === 'AbortError') {
+                        console.log('Fetch aborted');
+                        // Optionally revert or leave the partially streamed code
+                         monacoEditor.setValue(`${accumulatedCode}\n\n/* --- Generation Aborted --- */`);
+                    } else {
+                        console.error('Streaming Error:', error);
+                        // Show error, possibly preserving existing code
+                        monacoEditor.setValue(`${currentCode}\n\n/* --- Error during code generation: ${error.message} --- */`);
+                    }
+                } finally {
+                    sendButton.disabled = false;
+                    sendButton.textContent = 'Send';
+                    // Remove the style element if it exists
+                    const animationStyle = document.querySelector('style');
+                    if (animationStyle && animationStyle.textContent.includes('dotsAnimation')) {
+                        animationStyle.remove();
+                    }
+                    fetchController = null; // Clear the controller
+                    updatePreview(); // Final preview update
+                }
+            }
+
+            // --- Event Listeners ---
+            sendButton.addEventListener('click', () => {
+                const prompt = promptInput.value.trim();
+                if (prompt && monacoEditor && credits > 0) { // Ensure editor exists and credits available
+                    fetchAndStreamCode(prompt);
+                    promptInput.value = ''; // Clear input after sending
+                }
+            });
+
+            promptInput.addEventListener('keypress', (event) => {
+                if (event.key === 'Enter') {
+                    event.preventDefault();
+                    const prompt = promptInput.value.trim();
+                    if (prompt && monacoEditor && credits > 0) { // Ensure editor exists and credits available
+                        fetchAndStreamCode(prompt);
+                        promptInput.value = ''; // Clear input after sending
+                    }
+                }
+            });
+            
+            // Update credits display every minute to show accurate time until refresh
+            setInterval(() => {
+                if (credits <= 0) {
+                    promptInput.placeholder = "Daily limit reached. Credits refresh in " + getTimeUntilRefresh();
+                }
+            }, 60000); // Update every minute
+
+        }); // End of require block
+
+    </script>
+
+</body>
+</html>
